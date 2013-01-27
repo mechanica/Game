@@ -37,7 +37,9 @@ local sprites = {
 local Object = {}
 
 function Object:new ( sprite )
-  o = sprite
+  o = {}
+  
+  for k, v in pairs( sprite ) do o[k] = v end
   
   o.gfxQuad = MOAIGfxQuad2D.new ()
   o.gfxQuad:setTexture ( sprite.src )
@@ -47,67 +49,80 @@ function Object:new ( sprite )
   o.prop:setDeck ( o.gfxQuad )
   
   o.transformation = {}
+  o.waypoints = {}
 
   function o:addToLayer ( layer )
     layer:insertProp ( self.prop )
   end
   
-  function o:moveTo ( target )
-    if ( self.thread ) then self.thread:stop() end
-    
-    local cx, cy = self.prop:getLoc ()
-    local tx, ty = target.prop:getLoc ()
-    
-    -- rotation --
-    
-    local rot = math.deg( math.atan2( ty - cy, tx - cx ) )
-    local cr = self.prop:getRot()
-    
-    if (rot - cr) < -180 then
-      rot = rot + 360
-    end
-    
-    if (rot - cr) > 180 then
-      rot = rot - 360
-    end
-    
-    -- move --
-    
-    local dx, dy = tx - cx, ty - cy
-
-    local distance = math.sqrt( dx*dx + dy*dy )
-          
-    local moveTime = distance / self.speed
-    
-    -- trigger --
-    
+  function o:addWaypoint ( target )
+    local waypoint = Object:new ( sprites.target )
+    waypoint.prop:setLoc ( target.prop:getLoc() )
+    table.insert ( self.waypoints, waypoint )
+  end
+  
+  function o:clearWaypoints ()
+    o.waypoints = {}
+  end
+  
+  function o:go ()    
     self.thread = MOAICoroutine.new ()
     
     self.thread:run(function ()
-      if ( self.transformation.rot ) then self.transformation.rot:stop() end
-      if ( self.transformation.move ) then self.transformation.move:stop() end
+      while ( #self.waypoints ~= 0 ) do
+        local target = table.remove(self.waypoints, 1)
+        
+        local cx, cy = self.prop:getLoc ()
+        local tx, ty = target.prop:getLoc ()
+    
+        -- rotation --
+    
+        local rot = math.deg( math.atan2( ty - cy, tx - cx ) )
+        local cr = self.prop:getRot()
+    
+        if (rot - cr) < -180 then
+          rot = rot + 360
+        end
+    
+        if (rot - cr) > 180 then
+          rot = rot - 360
+        end
+    
+        -- move --
+    
+        local dx, dy = tx - cx, ty - cy
 
-      if math.abs ( rot - cr ) < 90 then
-        self.prop:setRot( rot )
-      else
-        self.transformation.rot = self.prop:seekRot( rot, .5, MOAIEaseType.LINEAR )
+        local distance = math.sqrt( dx*dx + dy*dy )
+          
+        local moveTime = distance / self.speed
+    
+        -- trigger --
+    
+        if ( self.transformation.rot ) then self.transformation.rot:stop() end
+        if ( self.transformation.move ) then self.transformation.move:stop() end
+
+        if math.abs ( rot - cr ) < 90 then
+          self.prop:setRot( rot )
+        else
+          self.transformation.rot = self.prop:seekRot( rot, .5, MOAIEaseType.LINEAR )
       
-        -- local ease = MOAIEaseDriver.new ()
-        -- 
-        -- ease:reserveLinks ( 1 )
-        -- ease:setLink ( 1, self.prop, MOAIProp2D.ATTR_Z_ROT, rot - cr )
-        -- ease:setSpan ( .5 )
-        -- ease:start ()
-        -- 
-        -- self.transformation.rot = ease
+          -- local ease = MOAIEaseDriver.new ()
+          -- 
+          -- ease:reserveLinks ( 1 )
+          -- ease:setLink ( 1, self.prop, MOAIProp2D.ATTR_Z_ROT, rot - cr )
+          -- ease:setSpan ( .5 )
+          -- ease:start ()
+          -- 
+          -- self.transformation.rot = ease
       
-        MOAICoroutine.blockOnAction ( self.transformation.rot )
+          MOAICoroutine.blockOnAction ( self.transformation.rot )
+        end
+        self.transformation.move = self.prop:moveLoc( dx, dy, moveTime, MOAIEaseType.LINEAR )
+        MOAICoroutine.blockOnAction ( self.transformation.move )
       end
-      self.transformation.move = self.prop:moveLoc( dx, dy, moveTime, MOAIEaseType.LINEAR )
-      MOAICoroutine.blockOnAction ( self.transformation.move )
     end)
   end
-
+  
   return o
 end
 
@@ -131,11 +146,21 @@ function pointerCallback ( x, y )
   target.prop:setLoc(layer:wndToWorld ( x, y ))
 end
 
-function clickCallback ( down )
+function leftClickCallback ( down )
   if not down then
-    male:moveTo( target )
+    male:clearWaypoints ()
+    male:addWaypoint ( target )
+    male:go ()
+  end
+end
+
+function rightClickCallback ( down )
+  if not down then
+    male:addWaypoint ( target )
+    if not ( male.thread and male.thread:isActive () ) then male:go () end
   end
 end
 
 MOAIInputMgr.device.pointer:setCallback ( pointerCallback )
-MOAIInputMgr.device.mouseLeft:setCallback ( clickCallback )
+MOAIInputMgr.device.mouseLeft:setCallback ( leftClickCallback )
+MOAIInputMgr.device.mouseRight:setCallback ( rightClickCallback )
